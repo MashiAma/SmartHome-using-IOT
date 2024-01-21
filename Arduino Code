@@ -1,1 +1,235 @@
+// #include <FirebaseESP8266.h>
+#include <ESP8266WiFi.h>
+#include <FirebaseArduino.h>
+#include <Servo.h>
+
+#define FIREBASE_HOST "smarthome-93c4c-default-rtdb.firebaseio.com" // Firebase host
+#define FIREBASE_AUTH "gyIx0JsNZ5Iwuv87NIE2hMcrik2oG7akw5sqDOhl" //Firebase Auth code
+#define WIFI_SSID "MobitelMashi" //Enter your wifi Name
+#define WIFI_PASSWORD "MashiAmaA" // Enter your password
+
+// Servo - gate
+Servo myservo;
+#define servoPin D0
+#define servoSwitch D1
+int servoPosition = 0;
+int stepDelay = 15;
+
+//Home Light
+#define homeSwitch D2
+#define homeLight D3
+
+//Gaden Light
+const int gardenLight = D4;
+const int ldrPin = A0;
+
+//Fire Alarm
+const int fireLight = D5;
+const int fireSensor = D6;
+
+void setup() {
+  Serial.begin(9600); //Serial Monitor
+  // Servo Motor
+  myservo.attach(servoPin);
+  pinMode(servoSwitch, INPUT_PULLUP);
+  myservo.write(servoPosition);
+
+  //Home Light
+pinMode(homeSwitch, INPUT_PULLUP);
+pinMode(homeLight, OUTPUT);
+
+//Gaden Light
+pinMode(gardenLight, OUTPUT);
+pinMode(ldrPin, INPUT);
+
+//Fire Alarm
+pinMode(fireLight, OUTPUT);
+pinMode(fireSensor, INPUT);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println();
+  Serial.println("Connected.");
+  Serial.println(WiFi.localIP());
+  Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
+
+//Set Initial value for variables
+// Servo -Gate
+  Firebase.setString("/SmartHome/Gate/servoStatus", "false");
+  Firebase.setString("/SmartHome/Gate/gateIs", "CLOSE");
+
+  // Home Light
+  Firebase.setString("/SmartHome/Home/ledStatus", "false");
+  Firebase.setString("/SmartHome/Home/homeLight", "OFF");
+
+//Gaden Light
+   Firebase.setString("/SmartHome/Garden/gardenLight", "OFF");
+  //Fire Alarm
+    Firebase.setString("/SmartHome/FireAlarm/fireLight", "OFF");
+
+}
+
+ 
+void loop() {
+
+// Home Light Control
+  bool swithchState = digitalRead(homeSwitch);
+  String ledStatus = Firebase.getString("/SmartHome/Home/ledStatus");
+  if(HomeSwitchChange(swithchState, ledStatus)){
+    Serial.println("LED Status has changed");
+    controlHomeLight(swithchState, ledStatus);
+  }
+// Servo Control
+  bool servoSwitchState = digitalRead(servoSwitch);
+  String servoStatus = Firebase.getString("/SmartHome/Gate/servoStatus");
+  if (GateSwitchChange(servoSwitchState, servoStatus)) {
+    Serial.println("Servo Status has changed");
+    controlGate(servoSwitchState, servoStatus);
+  }
+
+    gardenLightControl();
+     fireAlarmControl();
+  
+}
+
+// Home Light Conrol Logic
+bool HomeSwitchChange(bool currentSwitchState, String currentLedStatus){
+  static bool previousSwitchState = false;
+  static String previousLedStatus = "false";
+
+  if (currentSwitchState != previousSwitchState || currentLedStatus != previousLedStatus) {
+    // Status has changed
+    previousSwitchState = currentSwitchState;
+    previousLedStatus = currentLedStatus;
+    return true;
+  }
+  return false;
+}
+void controlHomeLight(bool switchState, String ledStatus){
+  
+  Serial.println("Control Home Light:");
+  Serial.println("    Switch State   : " + String(switchState));
+  Serial.println("    Firebase State : " + String(ledStatus));
+
+  if(switchState == 0){
+    if(ledStatus == "false"){
+      digitalWrite(homeLight, LOW);
+      Firebase.setString("/SmartHome/Home/homeLight", "OFF");
+    }
+     else if(ledStatus == "true"){
+      digitalWrite(homeLight, HIGH);
+      Firebase.setString("/SmartHome/Home/homeLight", "ON");
+    }
+  } 
+  else{
+    if(ledStatus == "false"){
+      digitalWrite(homeLight, HIGH);
+      Firebase.setString("/SmartHome/Home/homeLight", "ON");
+    } 
+    else if(ledStatus == "true"){
+      digitalWrite(homeLight, LOW);
+      Firebase.setString("/SmartHome/Home/homeLight", "OFF");
+    }
+  }
+}
+
+//Garden Light Control Logic
+void gardenLightControl(){
+  int lightLevel = analogRead(ldrPin);
+  Serial.println(lightLevel);
+  if (lightLevel <75) {
+    digitalWrite(gardenLight, HIGH);
+    Firebase.setString("/SmartHome/Garden/gardenLight", "ON");
+    Serial.println("Garden Light Turned ON");
+  } 
+  
+  else {
+    digitalWrite(gardenLight, LOW);
+    Firebase.setString("/SmartHome/Garden/gardenLight", "OFF");
+    Serial.println("Garden Light Turned OFF");
+  }
+  
+}
+
+//Fire Alarm Control Logic
+void fireAlarmControl(){
+int fireLevel = digitalRead(fireSensor);
+  Serial.println(fireLevel);
+
+  if (fireLevel == 0) {
+    Serial.println("Fire Detected");
+    Firebase.setString("/SmartHome/FireAlarm/fireLight", "ON");
+    digitalWrite(fireLight, HIGH);
+    delay(200);
+    digitalWrite(fireLight, LOW);
+    delay(200);
+
+  } else {
+    digitalWrite(fireLight, LOW);
+Firebase.setString("/SmartHome/FireAlarm/fireLight", "OFF");
+Serial.println("Fire Not Detected");
+   
+  }
+}
+ 
+ //Servo Motor Logic
+bool GateSwitchChange(bool currentServoSwitchState, String currentServoStatus) {
+  static bool previousServoSwitchState = false;
+  static String previousServoStatus = "CLOSE";
+
+  if (previousServoSwitchState != currentServoSwitchState || currentServoStatus != previousServoStatus) {
+    // Status has changed
+    previousServoSwitchState = currentServoSwitchState;
+    previousServoStatus = currentServoStatus;
+    return true;
+  }
+  return false;
+}
+
+void controlGate(bool servoSwitchState, String servoStatus) {
+  Serial.println("Control Gate:");
+  Serial.println("    Switch State   : " + String(servoSwitchState));
+  Serial.println("    Firebase State : " + String(servoStatus));
+
+  if (servoSwitchState == 0) {
+    if (servoStatus == "false") {
+      Firebase.setString("/SmartHome/Gate/gateIs", "OPEN");
+      Serial.println("    Servo : OFF");
+      servoRotate(90, 0);
+    } 
+    else if (servoStatus == "true"){
+      Firebase.setString("/SmartHome/Gate/gateIs", "CLOSE");
+      Serial.println("    Servo : ON");
+      servoRotate(0, 90);
+    }} 
+  else {
+    if (servoStatus == "false") {
+      Firebase.setString("/SmartHome/Gate/gateIs", "CLOSE");
+      Serial.println("    Servo : ON");
+      servoRotate(0, 90);
+    } 
+    else if(servoStatus == "true") {
+      Firebase.setString("/SmartHome/Gate/gateIs", "OPEN");
+      Serial.println("    Servo : OFF");
+      servoRotate(90, 0);
+    }
+  }}
+
+// Servo rotation Logic
+void servoRotate(int from, int to) {
+  if (from < to) {
+    for (int pos = from; pos <= to; pos++) {
+      myservo.write(pos);
+      delay(stepDelay);
+    }
+  } else {
+    for (int pos = from; pos >= to; pos--) {
+      myservo.write(pos);
+      delay(stepDelay);
+    }
+  }
+}
 
